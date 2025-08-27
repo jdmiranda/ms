@@ -6,8 +6,7 @@
     "type": "git",
     "url": "git+https://github.com/vercel/ms.git"
   },
-  "main": "./dist/index.cjs",
-  "types": "./dist/index.d.cts",
+  "types": "./dist/index.d.ts",
   "type": "module",
   "exports": {
     ".": {
@@ -15,16 +14,13 @@
         "types": "./dist/index.d.ts",
         "default": "./dist/index.js"
       },
-      "require": {
-        "types": "./dist/index.d.cts",
-        "default": "./dist/index.cjs"
-      }
+      "default": "./dist/index.js"
     }
   },
   "sideEffects": false,
   "license": "MIT",
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   },
   "packageManager": "pnpm@10.14.0-0+sha512.2cd47a0cbf5f1d1de7693a88307a0ede5be94e0d3b34853d800ee775efbea0650cb562b77605ec80bc8d925f5cd27c4dfe8bb04d3a0b76090784c664450d32d6",
   "files": [
@@ -38,7 +34,7 @@
     "lint": "biome lint",
     "format": "biome format",
     "typecheck": "tsc --noEmit",
-    "attw": "pnpm build && attw --pack .",
+    "attw": "pnpm build && attw --pack --profile esm-only .",
     "precommit": "lint-staged",
     "prepare": "husky"
   },
