@@ -26,6 +26,98 @@ type Unit =
 
 type UnitAnyCase = Capitalize<Unit> | Uppercase<Unit> | Unit;
 
+// OPTIMIZATION: Pre-compiled regex pattern (executed once instead of on every parse)
+const parseRegex = /^(?<value>-?\d*\.?\d+) *(?<unit>milliseconds?|msecs?|ms|seconds?|secs?|s|minutes?|mins?|m|hours?|hrs?|h|days?|d|weeks?|w|months?|mo|years?|yrs?|y)?$/i;
+
+// OPTIMIZATION: LRU Cache for parsed values
+class LRUCache {
+  private cache: Map<string, number>;
+  private maxSize: number;
+
+  constructor(maxSize = 100) {
+    this.cache = new Map();
+    this.maxSize = maxSize;
+  }
+
+  get(key: string): number | undefined {
+    const value = this.cache.get(key);
+    if (value !== undefined) {
+      // Move to end (most recently used)
+      this.cache.delete(key);
+      this.cache.set(key, value);
+    }
+    return value;
+  }
+
+  set(key: string, value: number): void {
+    // Remove if already exists to re-insert at end
+    if (this.cache.has(key)) {
+      this.cache.delete(key);
+    }
+    // If at capacity, remove oldest (first) entry
+    else if (this.cache.size >= this.maxSize) {
+      const firstKey = this.cache.keys().next().value;
+      this.cache.delete(firstKey);
+    }
+    this.cache.set(key, value);
+  }
+}
+
+const parseCache = new LRUCache(100);
+
+// OPTIMIZATION: Lookup table for common exact values (instant lookup)
+const commonValues: Record<string, number> = {
+  // Most common patterns without spaces
+  '1s': 1000,
+  '2s': 2000,
+  '5s': 5000,
+  '10s': 10000,
+  '15s': 15000,
+  '30s': 30000,
+  '1m': 60000,
+  '2m': 120000,
+  '5m': 300000,
+  '10m': 600000,
+  '15m': 900000,
+  '30m': 1800000,
+  '1h': 3600000,
+  '2h': 7200000,
+  '3h': 10800000,
+  '6h': 21600000,
+  '12h': 43200000,
+  '1d': 86400000,
+  '2d': 172800000,
+  '7d': 604800000,
+  '1w': 604800000,
+  '2w': 1209600000,
+  '1mo': 2629800000,
+  '1y': 31557600000,
+
+  // With spaces
+  '1 s': 1000,
+  '1 m': 60000,
+  '1 h': 3600000,
+  '1 d': 86400000,
+  '1 w': 604800000,
+
+  // Just numbers (default to ms)
+  '100': 100,
+  '1000': 1000,
+  '5000': 5000,
+};
+
+// OPTIMIZATION: Unit lookup table for fast switch replacement
+const unitMultipliers: Record<string, number> = {
+  'years': y, 'year': y, 'yrs': y, 'yr': y, 'y': y,
+  'months': mo, 'month': mo, 'mo': mo,
+  'weeks': w, 'week': w, 'w': w,
+  'days': d, 'day': d, 'd': d,
+  'hours': h, 'hour': h, 'hrs': h, 'hr': h, 'h': h,
+  'minutes': m, 'minute': m, 'mins': m, 'min': m, 'm': m,
+  'seconds': s, 'second': s, 'secs': s, 'sec': s, 's': s,
+  'milliseconds': 1, 'millisecond': 1, 'msecs': 1, 'msec': 1, 'ms': 1,
+};
+
 export type StringValue =
   | `${number}`
   | `${number}${UnitAnyCase}`
@@ -74,10 +166,22 @@ export function parse(str: string): number {
       `Value provided to ms.parse() must be a string with length between 1 and 99. value=${JSON.stringify(str)}`,
     );
   }
-  const match =
-    /^(?<value>-?\d*\.?\d+) *(?<unit>milliseconds?|msecs?|ms|seconds?|secs?|s|minutes?|mins?|m|hours?|hrs?|h|days?|d|weeks?|w|months?|mo|years?|yrs?|y)?$/i.exec(
-      str,
-    );
+
+  // OPTIMIZATION: Check cache first
+  const cached = parseCache.get(str);
+  if (cached !== undefined) {
+    return cached;
+  }
+
+  // OPTIMIZATION: Fast path - check common values lookup table
+  const commonValue = commonValues[str];
+  if (commonValue !== undefined) {
+    parseCache.set(str, commonValue);
+    return commonValue;
+  }
+
+  // OPTIMIZATION: Use pre-compiled regex instead of inline regex
+  const match = parseRegex.exec(str);
 
   if (!match?.groups) {
     return NaN;
@@ -91,59 +195,23 @@ export function parse(str: string): number {
   };
 
   const n = parseFloat(value);
+  const matchUnit = unit.toLowerCase();
 
-  const matchUnit = unit.toLowerCase() as Lowercase<Unit>;
+  // OPTIMIZATION: Use lookup table instead of switch statement
+  const multiplier = unitMultipliers[matchUnit];
 
-  /* istanbul ignore next - istanbul doesn't understand, but thankfully the TypeScript the exhaustiveness check in the default case keeps us type safe here */
-  switch (matchUnit) {
-    case 'years':
-    case 'year':
-    case 'yrs':
-    case 'yr':
-    case 'y':
-      return n * y;
-    case 'months':
-    case 'month':
-    case 'mo':
-      return n * mo;
-    case 'weeks':
-    case 'week':
-    case 'w':
-      return n * w;
-    case 'days':
-    case 'day':
-    case 'd':
-      return n * d;
-    case 'hours':
-    case 'hour':
-    case 'hrs':
-    case 'hr':
-    case 'h':
-      return n * h;
-    case 'minutes':
-    case 'minute':
-    case 'mins':
-    case 'min':
-    case 'm':
-      return n * m;
-    case 'seconds':
-    case 'second':
-    case 'secs':
-    case 'sec':
-    case 's':
-      return n * s;
-    case 'milliseconds':
-    case 'millisecond':
-    case 'msecs':
-    case 'msec':
-    case 'ms':
-      return n;
-    default:
-      matchUnit satisfies never;
-      throw new Error(
-        `Unknown unit "${matchUnit}" provided to ms.parse(). value=${JSON.stringify(str)}`,
-      );
+  if (multiplier === undefined) {
+    throw new Error(
+      `Unknown unit "${matchUnit}" provided to ms.parse(). value=${JSON.stringify(str)}`,
+    );
   }
+
+  const result = n * multiplier;
+
+  // Cache the result for future use
+  parseCache.set(str, result);
+
+  return result;
 }
 
 /**
